@@ -1,0 +1,86 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node / TypeScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.turbo/
+.next/
+.nuxt/
+coverage/
+
+# Rust
+target/
+
+# Generated PaperHub data
+.paperhub/
+paperhub-cache/
+paperhub-output/
+
+# Generated example vault output. Keep examples/sample-vault/README.md as the placeholder.
+# Some legacy surfaces stay ignored so old generated samples are not committed by accident.
+examples/sample-vault/.paperhub/
+examples/sample-vault/Papers/
+examples/sample-vault/Digests/
+examples/sample-vault/Guides/
+examples/sample-vault/Concepts/
+examples/sample-vault/Claims/
+examples/sample-vault/Reading Paths/
+examples/sample-vault/Projects/
+examples/sample-vault/Maps/
+examples/sample-vault/Templates/
+examples/sample-vault/00 Home.md
+examples/sample-vault/01 Reading Dashboard.md
+examples/sample-vault/02 Paper Index.md
+examples/sample-vault/02 Digest Index.md
+examples/sample-vault/02 Guide Index.md
+
+# Local research data that should not be committed by accident
+*.sqlite
+*.sqlite3
+*.db
+*.pdf
+*.epub
+
+# Obsidian local state
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+.trash/

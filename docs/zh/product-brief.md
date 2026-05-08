@@ -46,15 +46,13 @@ Codex / Claude Code 持续维护
 用户打开 Obsidian 后，应看到研究驾驶舱，而不是一堆文件：
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 
 Papers/
 Guides/
 ```
 
-`Papers/` 存放规范化 paper notes。`Guides/` 每个文件夹对应一个课题；substantial topic 应有 main guide 和有意义的 section notes。Guide 是用户真正阅读的 reading/survey artifact，literature-backed sections 应回链到 `Papers/`。
+`Papers/` 存放规范化 paper notes。`Guides/` 每个文件夹对应一个课题；substantial topic 应有 main guide 和有意义的 section notes。Guide 是用户真正阅读的 reading/survey artifact：main guide 链接一级 sections，父 sections 链接子 sections，只有 leaf 或 generated overview sections 回链到 `Papers/`。
 
 ## MVP
 

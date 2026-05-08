@@ -4,6 +4,13 @@
 
 This plan describes the revised MVP direction: PaperHub should support `paperhub import markdown`, but only as a processed import that normalizes external research material into the same Obsidian structure used by agent-generated topic guides.
 
+The MVP should keep two related but distinct modes:
+
+- deterministic import: parse and sanitize source Markdown, reconcile papers, and write vault-local `Papers/` and `Guides/` output without requiring an LLM call;
+- prompt-driven synthesis: use the imported source material plus a user task prompt to generate a new task-aware reading guide through Codex, Claude Code, an MCP client, or a future local service.
+
+For example, importing an awesome-list README can preserve a source-derived PaperHub guide as a baseline, while an agent workflow can also produce a separate guide for a prompt such as: "I am an agent engineer working with hundreds of millions of users and need an efficient benchmark for training and tuning agents. Where should I start reading?"
+
 ## Output Contract
 
 The vault output should be:
@@ -23,6 +30,9 @@ Substantial imports should create more than a single topic Markdown file. A long
 list, benchmark review, or multi-paper research note should become a main guide plus graph-visible
 section notes. The main guide is the synthesis and navigation surface; section notes are the durable
 topic-level nodes that can cite one or more normalized `Papers/` notes.
+In the generated wikilink graph, the main guide should link only to top-level sections. Parent
+sections should link to immediate child sections, and paper links should live on leaf sections or on
+generated `overview/overview.md` children when a parent section has its own paper bullets.
 
 The importer or agent workflow must not mechanically split by every source file, paper digest, or
 heading. It should first read the imported guide material, infer the author's intended structure, and
@@ -38,6 +48,7 @@ digest material for later Zotero reconciliation.
 
 ```bash
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge"
+paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --goal "I am an agent engineer building large-scale benchmarks; where should I start reading?"
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --dry-run
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --apply
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --on-missing-paper stage
@@ -49,6 +60,7 @@ Initial flags:
 
 - `SOURCE`: required one-off source path.
 - `--topic`: required at first; topic inference can come later.
+- `--goal`: optional user task prompt. PaperHub stores it in the import plan and guide as an agent-ready synthesis brief; deterministic import still runs without a model call.
 - default behavior: produce an import plan and report without writing.
 - `--dry-run`: legacy alias for the default preview behavior.
 - `--apply`: write the reviewed import plan to the vault.
@@ -123,8 +135,10 @@ Do not add `PAPERHUB_MARKDOWN_SOURCE` or equivalent persistent config.
 Codex / Claude Code can create knowledge for a user topic through a workflow like:
 
 ```text
-user topic
-  -> deep research across the web and current Zotero library
+source Markdown + user task prompt
+  -> PaperHub parses source papers, sections, links, and metadata
+  -> agent reads the structured source context and the user's goal
+  -> optional deep research across the web and current Zotero library
   -> candidate bibliography
   -> add missing papers to Zotero or staged import
   -> complete normalized Papers/ notes
@@ -132,7 +146,9 @@ user topic
   -> relationship manifest for later graph work
 ```
 
-The generated guide should be more like a structured reading guide or survey than a loose note dump. Every literature-backed section should link to one or more normalized paper notes.
+The generated guide should be more like a structured reading guide or survey than a loose note dump. It should be newly organized around the user's task, role, constraints, and desired output artifacts rather than mechanically preserving the source Markdown order. Every literature-backed section should link to one or more normalized paper notes.
+
+PaperHub core should not own the open-ended reasoning step directly. Its job is to provide reliable ingredients and guardrails: source extraction, paper reconciliation, import plans, prompt/context packages, deterministic vault writes, and validation. Codex / Claude Code or another agent can own the synthesis prose and reading-order decisions.
 
 ## Knowledge Graph Path
 
@@ -162,13 +178,15 @@ Do not include full paper titles in filenames. Long titles should appear in fron
 
 - Running `paperhub import markdown SOURCE --topic TOPIC` prints a clear import plan and writes nothing.
 - Running with `--apply` writes only under `Papers/`, `Guides/`, and root dashboard/index files.
+- Deterministic import remains usable without any model call.
+- A prompt-driven agent workflow can take imported source context plus a user prompt and produce a new task-aware guide, while still writing through PaperHub's `Papers/` and `Guides/` contracts.
 - Imported paper digests that are not in Zotero are written to `Papers/IMPORTED-*.md` and listed by `paperhub zotero push-staged`.
 - Zotero writes require the explicit `paperhub zotero push-staged --write` command.
 - The importer does not copy the source directory directly.
 - Generated output does not reference files outside the current vault. Web URLs may remain; local source files, images, attachments, absolute paths, and provenance paths must not become vault links.
 - Paper notes include Zotero-derived collections, tags, notes, attachment metadata, annotations, relations, sync versions, plus citation, BibTeX, digest, and user-preserved sections.
-- The topic guide has a main Markdown file and links back to `Papers/`.
-- Resolved guide sections emit `guide-section-cites-paper` relationship records.
+- The topic guide has a main Markdown file that links to top-level sections, not directly to every paper.
+- Resolved leaf or overview guide sections emit `guide-section-cites-paper` relationship records.
 - Paper note filenames use citation-key stems rather than Zotero keys or title-length slugs.
 - Missing or ambiguous papers are reported.
 - Existing user-authored sections are preserved.

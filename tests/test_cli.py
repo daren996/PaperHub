@@ -137,7 +137,14 @@ def test_import_markdown_writes_only_papers_and_guides_surfaces(tmp_path, monkey
 
     assert result.exit_code == 0
     main_guide = vault / "Guides" / "llm-as-a-judge" / "llm-as-a-judge.md"
-    section = vault / "Guides" / "llm-as-a-judge" / "sections" / "bias-and-reliability.md"
+    section = (
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "bias-and-reliability"
+        / "bias-and-reliability.md"
+    )
     assert main_guide.exists()
     assert section.exists()
     assert "[[Papers/smith2024judge|PAPER1]]" in section.read_text(encoding="utf-8")
@@ -149,10 +156,8 @@ def test_import_markdown_writes_only_papers_and_guides_surfaces(tmp_path, monkey
     assert manifest["relationships"][0]["paper_path"] == "Papers/smith2024judge.md"
     root_names = {path.name for path in vault.iterdir() if path.name != ".paperhub"}
     assert root_names == {
-        "00 Home.md",
-        "01 Reading Dashboard.md",
-        "02 Paper Index.md",
         "README.md",
+        "PaperIndex.md",
         "Papers",
         "Guides",
     }
@@ -195,8 +200,224 @@ def test_import_markdown_accepts_single_file_source(tmp_path, monkeypatch) -> No
     staged_paper = staged_papers[0]
     assert staged_paper.title == "Missing Paper"
     assert (vault / "Papers" / f"{staged_paper.key}.md").exists()
-    assert f"[[Papers/{staged_paper.key}|{staged_paper.key}]]" in main_guide.read_text(
-        encoding="utf-8"
+    assert "[[Papers/" not in main_guide.read_text(encoding="utf-8")
+
+
+def test_import_markdown_accepts_user_goal_prompt(tmp_path, monkeypatch) -> None:
+    vault = tmp_path / "ResearchVault"
+    source = tmp_path / "README.md"
+    source.write_text(
+        "# Awesome LLM Judges\n\n## Benchmarking\n\nA curated source list.\n",
+        encoding="utf-8",
+    )
+    goal = (
+        "I am an agent engineer working with hundreds of millions of users and "
+        "need an efficient benchmark for training and tuning agents."
+    )
+    monkeypatch.setenv("PAPERHUB_VAULT", str(vault))
+    runner = CliRunner()
+    runner.invoke(app, ["init"])
+
+    dry_run = runner.invoke(
+        app,
+        [
+            "import",
+            "markdown",
+            str(source),
+            "--topic",
+            "LLM as a Judge",
+            "--goal",
+            goal,
+        ],
+    )
+
+    assert dry_run.exit_code == 0
+    assert "Research goal:" in dry_run.output
+    assert goal in dry_run.output
+    assert not (vault / "Guides" / "llm-as-a-judge").exists()
+
+    result = runner.invoke(
+        app,
+        [
+            "import",
+            "markdown",
+            str(source),
+            "--topic",
+            "LLM as a Judge",
+            "--goal",
+            goal,
+            "--apply",
+        ],
+    )
+
+    assert result.exit_code == 0
+    main_text = (
+        vault / "Guides" / "llm-as-a-judge" / "llm-as-a-judge.md"
+    ).read_text(encoding="utf-8")
+    assert "## User Research Goal" in main_text
+    assert goal in main_text
+    assert "## Agent Synthesis Brief" in main_text
+    assert "Use this imported source as evidence, not as the final outline." in main_text
+    assert "## Source-Derived Baseline" in main_text
+    assert "A curated source list." in main_text
+
+
+def test_import_markdown_splits_single_file_paperlist_into_nested_wiki(
+    tmp_path, monkeypatch
+) -> None:
+    vault = tmp_path / "ResearchVault"
+    source = tmp_path / "README.md"
+    source.write_text(
+        "# Awesome LLM Judges\n\n"
+        "# About This Repo\n\nIntro material.\n\n"
+        "# 📑 PaperList\n\n"
+        "# 1. Functionality\n\n"
+        "- **Parent Direct Paper**\n\n"
+        "  arXiv 2024. [[Paper](https://arxiv.org/abs/2401.00003)]\n\n"
+        "## 1.1 Performance Evaluation\n\n"
+        "### 1.1.1 Responses Evaluation\n"
+        "- **Resolved Judge Paper**\n\n"
+        "  ACL 2024. [[Paper](https://arxiv.org/abs/2401.00001)]\n"
+        "- **Missing Judge Paper**\n\n"
+        "  arXiv 2024. [[Paper](https://arxiv.org/abs/2401.00002)]\n\n"
+        "# 👏 Welcome to discussion\n\nFooter material.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PAPERHUB_VAULT", str(vault))
+    save_index(
+        vault,
+        PaperHubIndex(
+            papers=[
+                Paper(
+                    key="PAPER1",
+                    title="Resolved Judge Paper",
+                    authors=[Author(last_name="Smith")],
+                    year=2024,
+                    url="https://arxiv.org/abs/2401.00001",
+                )
+            ]
+        ),
+    )
+    runner = CliRunner()
+    runner.invoke(app, ["init"])
+
+    dry_run = runner.invoke(
+        app,
+        ["import", "markdown", str(source), "--topic", "LLM as a Judge"],
+    )
+
+    assert dry_run.exit_code == 0
+    assert (
+        "Guides/llm-as-a-judge/sections/1-functionality/1-functionality.md"
+        in dry_run.output
+    )
+    assert (
+        "Guides/llm-as-a-judge/sections/1-functionality/"
+        "1-1-performance-evaluation/1-1-performance-evaluation.md"
+        in dry_run.output
+    )
+
+    result = runner.invoke(
+        app,
+        ["import", "markdown", str(source), "--topic", "LLM as a Judge", "--apply"],
+    )
+
+    assert result.exit_code == 0
+    main_guide = vault / "Guides" / "llm-as-a-judge" / "llm-as-a-judge.md"
+    main_text = main_guide.read_text(encoding="utf-8")
+    assert "Intro material." in main_text
+    assert "Footer material." in main_text
+    assert "# 1. Functionality" not in main_text
+    assert (
+        "[[Guides/llm-as-a-judge/sections/1-functionality/1-functionality|"
+        "1. Functionality]]"
+    ) in main_text
+    assert "1.1 Performance Evaluation" not in main_text
+    assert "[[Papers/" not in main_text
+
+    parent_note = (
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "1-functionality"
+        / "1-functionality.md"
+    )
+    overview_note = (
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "1-functionality"
+        / "overview"
+        / "overview.md"
+    )
+    child_note = (
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "1-functionality"
+        / "1-1-performance-evaluation"
+        / "1-1-performance-evaluation.md"
+    )
+    leaf_note = (
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "1-functionality"
+        / "1-1-performance-evaluation"
+        / "1-1-1-responses-evaluation"
+        / "1-1-1-responses-evaluation.md"
+    )
+    assert parent_note.exists()
+    assert overview_note.exists()
+    assert child_note.exists()
+    parent_text = parent_note.read_text(encoding="utf-8")
+    assert "[[Papers/" not in parent_text
+    assert (
+        "[[Guides/llm-as-a-judge/sections/1-functionality/overview/overview|"
+        "Overview]]"
+    ) in parent_text
+    assert (
+        "[[Guides/llm-as-a-judge/sections/1-functionality/"
+        "1-1-performance-evaluation/1-1-performance-evaluation|"
+        "1 1 Performance Evaluation]]"
+    ) in parent_text
+    leaf_text = leaf_note.read_text(encoding="utf-8")
+    staged_papers = [
+        paper for paper in load_index(vault).papers if paper.key.startswith("IMPORTED-")
+    ]
+    assert len(staged_papers) == 2
+    staged_by_title = {paper.title: paper for paper in staged_papers}
+    parent_staged = staged_by_title["Parent Direct Paper"]
+    leaf_staged = staged_by_title["Missing Judge Paper"]
+    overview_text = overview_note.read_text(encoding="utf-8")
+    assert f"[[Papers/{parent_staged.key}|{parent_staged.key}]]" in overview_text
+    assert "[[Papers/smith2024resolved|PAPER1]]" not in overview_text
+    assert "[[Papers/smith2024resolved|PAPER1]]" in leaf_text
+    assert f"[[Papers/{leaf_staged.key}|{leaf_staged.key}]]" in leaf_text
+    assert (vault / "Papers" / f"{parent_staged.key}.md").exists()
+    assert (vault / "Papers" / f"{leaf_staged.key}.md").exists()
+
+    relationship_manifest = json.loads(
+        (
+            vault / ".paperhub" / "relationships" / "guide-section-cites-paper.json"
+        ).read_text(encoding="utf-8")
+    )
+    relationship_paths = {
+        relationship["guide_section_path"]
+        for relationship in relationship_manifest["relationships"]
+    }
+    assert relationship_paths == {
+        "Guides/llm-as-a-judge/sections/1-functionality/overview/overview.md",
+        "Guides/llm-as-a-judge/sections/1-functionality/"
+        "1-1-performance-evaluation/1-1-1-responses-evaluation/"
+        "1-1-1-responses-evaluation.md",
+    }
+    assert "Guides/llm-as-a-judge/sections/1-functionality/1-functionality.md" not in (
+        relationship_paths
     )
 
 
@@ -254,11 +475,16 @@ def test_import_markdown_strips_references_to_files_outside_vault(
         path.read_text(encoding="utf-8")
         for path in [
             vault / "Guides" / "llm-as-a-judge" / "llm-as-a-judge.md",
-            vault / "Guides" / "llm-as-a-judge" / "sections" / "bias-section.md",
+            vault
+            / "Guides"
+            / "llm-as-a-judge"
+            / "sections"
+            / "bias-section"
+            / "bias-section.md",
             next((vault / "Papers").glob("IMPORTED-*.md")),
         ]
     )
-    assert "[[Papers/IMPORTED-" in generated_text
+    assert "[[Papers/smith2024judge|PAPER1]]" in generated_text
     assert "[Web](https://example.com/paper)" in generated_text
     assert "[Web](https://example.com/supplement)" in generated_text
     for forbidden in [
@@ -361,10 +587,8 @@ def test_import_markdown_normalizes_heterogeneous_markdown_sources(
     assert result.exit_code == 0
     root_names = {path.name for path in vault.iterdir() if path.name != ".paperhub"}
     assert root_names == {
-        "00 Home.md",
-        "01 Reading Dashboard.md",
-        "02 Paper Index.md",
         "README.md",
+        "PaperIndex.md",
         "Papers",
         "Guides",
     }
@@ -376,18 +600,23 @@ def test_import_markdown_normalizes_heterogeneous_markdown_sources(
     assert "unknown-file" in main_text
     section_paths = sorted(
         path.relative_to(vault).as_posix()
-        for path in (vault / "Guides" / "llm-as-a-judge" / "sections").glob("*.md")
+        for path in (vault / "Guides" / "llm-as-a-judge" / "sections").rglob("*.md")
     )
     assert section_paths == [
-        "Guides/llm-as-a-judge/sections/intro-76126540.md",
-        "Guides/llm-as-a-judge/sections/intro.md",
-        "Guides/llm-as-a-judge/sections/loose.md",
+        "Guides/llm-as-a-judge/sections/intro-76126540/intro-76126540.md",
+        "Guides/llm-as-a-judge/sections/intro/intro.md",
+        "Guides/llm-as-a-judge/sections/loose/loose.md",
     ]
     assert "[[Papers/smith2024anchor|PAPER1]]" in (
-        vault / "Guides" / "llm-as-a-judge" / "sections" / "intro.md"
+        vault / "Guides" / "llm-as-a-judge" / "sections" / "intro" / "intro.md"
     ).read_text(encoding="utf-8")
     assert "[[Papers/jones2023doi|PAPER2]]" in (
-        vault / "Guides" / "llm-as-a-judge" / "sections" / "intro-76126540.md"
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "intro-76126540"
+        / "intro-76126540.md"
     ).read_text(encoding="utf-8")
     paper_text = (vault / "Papers" / "lee2022judge.md").read_text(encoding="utf-8")
     assert "Paper digest content." in paper_text
@@ -399,8 +628,14 @@ def test_import_markdown_normalizes_heterogeneous_markdown_sources(
         (relationship["guide_section_path"], relationship["paper_path"])
         for relationship in manifest["relationships"]
     } >= {
-        ("Guides/llm-as-a-judge/sections/intro.md", "Papers/smith2024anchor.md"),
-        ("Guides/llm-as-a-judge/sections/intro-76126540.md", "Papers/jones2023doi.md"),
+        (
+            "Guides/llm-as-a-judge/sections/intro/intro.md",
+            "Papers/smith2024anchor.md",
+        ),
+        (
+            "Guides/llm-as-a-judge/sections/intro-76126540/intro-76126540.md",
+            "Papers/jones2023doi.md",
+        ),
     }
     assert not (vault / "source").exists()
     assert not (vault / "Collections").exists()
@@ -490,7 +725,8 @@ def test_import_markdown_merges_duplicate_staged_paper_titles(tmp_path, monkeypa
     main_text = (vault / "Guides" / "llm-as-a-judge" / "llm-as-a-judge.md").read_text(
         encoding="utf-8"
     )
-    assert main_text.count(f"[[Papers/{staged_papers[0].key}|Paper]]") == 1
+    assert f"[[Papers/{staged_papers[0].key}|Paper]]" not in main_text
+    assert "[[Papers/" not in main_text
 
     second = runner.invoke(
         app,
@@ -539,7 +775,12 @@ def test_import_markdown_removes_stale_generated_sections_on_reimport(
     )
     assert first.exit_code == 0
     section_path = (
-        vault / "Guides" / "llm-as-a-judge" / "sections" / "temporary-section.md"
+        vault
+        / "Guides"
+        / "llm-as-a-judge"
+        / "sections"
+        / "temporary-section"
+        / "temporary-section.md"
     )
     assert section_path.exists()
 

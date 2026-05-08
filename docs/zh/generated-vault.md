@@ -7,15 +7,13 @@
 ## Root Files
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 README.md
 ```
 
-`02 Paper Index.md` 应作为从 citation-key paper note filename 到真实 paper title 的人类可读映射。生成的 table 应展示 `Papers/<citation-key>.md` file、完整 paper title、year 和 Zotero key。Citation-key 文件名让 graph labels 更可读；index 负责恢复浏览和查找时需要的 title mapping。
+`PaperIndex.md` 是 PaperHub 在 vault 根目录生成的单一入口文件。它合并原来的 home summary、reading dashboard、topic guide links，以及从 citation-key paper note filename 到真实 paper title 的人类可读映射。生成的 paper table 应展示 `Papers/<citation-key>.md` file、完整 paper title、year 和 Zotero key。Citation-key 文件名让 graph labels 更可读；index 负责恢复浏览和查找时需要的 title mapping。
 
-`README.md` 是 vault 根目录入口。Processed Markdown import 应更新其中 generated `Topic Guides` section，把当前 topic 的 main guide 链接写进去，例如 `[[Guides/llm-as-a-judge/llm-as-a-judge|LLM as a Judge]]`，同时保留用户笔记。
+`README.md` 是轻量兼容入口。Processed Markdown import 应更新其中 generated `Topic Guides` section，把当前 topic 的 main guide 链接和 `[[PaperIndex]]` 写进去，同时保留用户笔记。
 
 当 imported paper material 缺少 author 或 year metadata 时，PaperHub 应先从 Zotero、source manifests、DOI/arXiv/OpenReview/ACL metadata 或其他可复核来源补齐 metadata，再写入最终 paper note。不要生成带 `unknown` 或 `nd` 的 filename parts。
 
@@ -83,6 +81,9 @@ Guide files 应包含：
 
 一个有实质内容的主题导入不应该只生成一个 Markdown 文件。当来源材料包含可分离的主题、论点、方法、benchmark 家族、paper cluster 或阅读步骤时，PaperHub 应该写入一个 main guide，再在 `Guides/<topic>/sections/` 或等价的主题子目录下写入 graph-visible 的 section notes。main guide 负责目录、综述和导航；section notes 负责承载聚焦内容，并链接回规范化的 `Papers/` notes。
 
+对于单文件的长篇 research catalog，section notes 应使用 folder-note 形式，让文件系统和 Obsidian graph 都能展示层级，例如 `Guides/<topic>/sections/1-functionality/1-functionality.md`，并在其下继续嵌套子 section 文件夹。
+Main guide 只应链接一级 section notes。父 section notes 应链接直属 child sections，而不是直接链接 papers。若父 section 自身也包含 paper bullets，PaperHub 应生成 `overview/overview.md` 子节点承载这些 papers，让可见图保持 `main guide -> sections -> subsections -> papers` 的层级。
+
 ## Markdown Import Contract
 
 `paperhub import markdown` 应把异构 source content 转换成同一套 output structure：
@@ -90,7 +91,8 @@ Guide files 应包含：
 ```text
 source paper digest -> Papers/<citation-key>.md
 source guide file   -> Guides/<topic>/<main-or-section>.md
-source subfolder    -> Guides/<topic>/<section>/
+source section       -> Guides/<topic>/sections/<section>/<section>.md
+source subfolder    -> Guides/<topic>/sections/<section>/
 ```
 
 Importer 应报告无法分类或无法对齐的文件。它绝不能把 source tree 直接复制进 vault，也不能在标准 `Guides/<topic>/` contract 之外保留任意 source structure。生成的 import 输出不得链接到当前 vault 外的文件。本地 source links、绝对路径、repository images、attachments 和 provenance paths 应被移除、改写成 vault 内 `Papers/` 或 `Guides/` 链接，或转成非链接文本；Web URL 可以保留。
@@ -115,4 +117,4 @@ guide-section-cites-paper
 
 ## Visualization Boundary
 
-第一阶段不应把 Obsidian global file-link graph 当成语义知识图谱。PaperHub 应先建模并验证明确 relationships。初始展示的 graph 应只显示 `guide-section-cites-paper` edges；`topic-contains-paper`、`paper-cites-paper` 和 `zotero-item-backs-paper` 可以等建模和验证完成后再扩展。
+第一阶段不应把 Obsidian global file-link graph 当成语义知识图谱。PaperHub 应先建模并验证明确 relationships。生成的 guide wikilinks 也应避免中心节点直连大量 paper：main guide 链接一级 sections，父 sections 链接子 sections，只有 leaf section 或 generated overview section 链接 paper notes。初始语义 graph 应只显示 `guide-section-cites-paper` edges；`topic-contains-paper`、`paper-cites-paper` 和 `zotero-item-backs-paper` 可以等建模和验证完成后再扩展。

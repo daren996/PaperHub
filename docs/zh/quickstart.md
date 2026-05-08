@@ -46,15 +46,13 @@ Markdown import source path 应留在命令行，不要写进 `.env`。
 你的 Obsidian vault 应包含：
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 
 Papers/
 Guides/
 ```
 
-`Papers/` 存放规范化 paper notes。每个同步到的 Zotero paper 都应有对应 note，用来组织 collections、tags、notes、attachments metadata、annotations、relations、sync versions、digest 和 synthesis content。`Guides/` 每个文件夹对应一个 topic，包含主 guide Markdown file，并用 section files 或子文件夹承载实质研究结构。Guide 内容应回链到 `Papers/`。
+`Papers/` 存放规范化 paper notes。每个同步到的 Zotero paper 都应有对应 note，用来组织 collections、tags、notes、attachments metadata、annotations、relations、sync versions、digest 和 synthesis content。`Guides/` 每个文件夹对应一个 topic，包含主 guide Markdown file，并用 section files 或子文件夹承载实质研究结构。Main guide 链接一级 sections；leaf 或 generated overview sections 回链到 `Papers/`。
 
 ## MVP 范围
 

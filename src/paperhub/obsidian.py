@@ -123,11 +123,16 @@ class ObsidianExporter:
         self, index: PaperHubIndex, filenames_by_key: dict[str, str] | None = None
     ) -> None:
         filenames_by_key = filenames_by_key or paper_filename_map(index.papers)
-        (self.vault / "00 Home.md").write_text(_home(index), encoding="utf-8")
-        (self.vault / "01 Reading Dashboard.md").write_text(_dashboard(index), encoding="utf-8")
-        (self.vault / "02 Paper Index.md").write_text(
+        self._remove_legacy_root_indexes()
+        (self.vault / "PaperIndex.md").write_text(
             _paper_index(index, filenames_by_key), encoding="utf-8"
         )
+
+    def _remove_legacy_root_indexes(self) -> None:
+        for filename in ["00 Home.md", "01 Reading Dashboard.md", "02 Paper Index.md"]:
+            path = self.vault / filename
+            if path.exists() and _is_generated_root_index(path):
+                path.unlink()
 
 
 def paper_filename(paper: Paper) -> str:
@@ -373,24 +378,7 @@ def _annotations_section(paper: Paper) -> str:
     return "\n".join(lines)
 
 
-def _home(index: PaperHubIndex) -> str:
-    return f"""# PaperHub
-
-<!-- paperhub:generated:start -->
-
-- Papers: {len(index.papers)}
-- Guides: {len(index.guides)}
-
-## Navigation
-
-- [[01 Reading Dashboard]]
-- [[02 Paper Index]]
-
-<!-- paperhub:generated:end -->
-"""
-
-
-def _dashboard(index: PaperHubIndex) -> str:
+def _dashboard_sections(index: PaperHubIndex) -> str:
     missing_abstracts = [paper for paper in index.papers if not paper.abstract]
     missing_doi = [paper for paper in index.papers if not paper.doi]
     missing_url = [paper for paper in index.papers if not paper.url]
@@ -411,13 +399,10 @@ def _dashboard(index: PaperHubIndex) -> str:
         attention.append(f"- Papers missing DOI values: {len(missing_doi)}")
     if missing_url:
         attention.append(f"- Papers missing URL values: {len(missing_url)}")
-    return f"""# Reading Dashboard
-
-<!-- paperhub:generated:start -->
-
-## Library
+    return f"""## Library
 
 - Zotero papers: {len(index.papers)}
+- Topic guides: {len(index.guides)}
 - Papers with PDF links: {pdf_count}
 
 ## Data Quality
@@ -432,20 +417,39 @@ def _dashboard(index: PaperHubIndex) -> str:
 ## Needs Attention
 
 {chr(10).join(attention) or "- None"}
-
-<!-- paperhub:generated:end -->
 """
 
 
 def _paper_index(index: PaperHubIndex, filenames_by_key: dict[str, str]) -> str:
     lines = [
-        "# Paper Index",
+        "# PaperIndex",
         "",
         "<!-- paperhub:generated:start -->",
         "",
+        "- Papers: " + str(len(index.papers)),
+        "- Guides: " + str(len(index.guides)),
+        "",
+        _dashboard_sections(index).rstrip(),
+        "",
+        "## Topic Guides",
+        "",
+    ]
+    if index.guides:
+        for guide in sorted(index.guides, key=lambda candidate: candidate.title.lower()):
+            lines.append(f"- [[{guide.main_path.removesuffix('.md')}|{guide.title}]]")
+    else:
+        lines.append("_No topic guides yet._")
+    lines.extend(
+        [
+            "",
+            "## Papers",
+            "",
+            "This table maps short citation-key paper note filenames to full paper titles.",
+            "",
         "| Paper File | Paper Title | Year | Zotero Key |",
         "| --- | --- | --- | --- |",
-    ]
+        ]
+    )
     for paper in index.papers:
         stem = filenames_by_key.get(paper.key, paper_filename(paper))
         filename = f"{stem}.md"
@@ -469,3 +473,12 @@ def _paper_index(index: PaperHubIndex, filenames_by_key: dict[str, str]) -> str:
 
 def _markdown_table_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _is_generated_root_index(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    return GENERATED_START in text and path.name in {
+        "00 Home.md",
+        "01 Reading Dashboard.md",
+        "02 Paper Index.md",
+    }

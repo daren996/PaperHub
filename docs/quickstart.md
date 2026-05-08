@@ -46,15 +46,13 @@ Applied Markdown imports never create links to local files outside the configure
 Your Obsidian vault should contain:
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 
 Papers/
 Guides/
 ```
 
-`Papers/` contains normalized paper notes. Every synced Zotero paper should have a corresponding note that organizes collections, tags, notes, attachment metadata, annotations, relations, sync versions, digest, and synthesis content. `Guides/` contains one folder per topic, each with a main guide Markdown file and section files or subfolders for substantial research structure. Guide content should link back to `Papers/`.
+`Papers/` contains normalized paper notes. Every synced Zotero paper should have a corresponding note that organizes collections, tags, notes, attachment metadata, annotations, relations, sync versions, digest, and synthesis content. `Guides/` contains one folder per topic, each with a main guide Markdown file and section files or subfolders for substantial research structure. Main guides link to top-level sections; leaf or generated overview sections link back to `Papers/`.
 
 ## MVP Scope
 

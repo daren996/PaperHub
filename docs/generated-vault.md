@@ -7,15 +7,13 @@ This document describes the intended Obsidian output.
 ## Root Files
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 README.md
 ```
 
-`02 Paper Index.md` should be the human-readable mapping from citation-key paper note filenames to real paper titles. The generated table should show the `Papers/<citation-key>.md` file, the full paper title, year, and Zotero key. Citation-key filenames keep graph labels readable; the index restores the title mapping for browsing and lookup.
+`PaperIndex.md` is the single generated root entry for PaperHub. It combines the former home summary, reading dashboard, topic guide links, and the human-readable mapping from citation-key paper note filenames to real paper titles. The generated paper table should show the `Papers/<citation-key>.md` file, the full paper title, year, and Zotero key. Citation-key filenames keep graph labels readable; the index restores the title mapping for browsing and lookup.
 
-`README.md` is the vault root entrypoint. Processed Markdown imports should update its generated `Topic Guides` section with a link to the current topic's main guide, such as `[[Guides/llm-as-a-judge/llm-as-a-judge|LLM as a Judge]]`, while preserving user notes.
+`README.md` is a lightweight compatibility entrypoint. Processed Markdown imports should update its generated `Topic Guides` section with a link to the current topic's main guide and to `[[PaperIndex]]`, while preserving user notes.
 
 ## Directories
 
@@ -90,6 +88,14 @@ equivalent topic subfolder. The main guide should act as the table of contents a
 section notes should carry focused imported or generated material and link back to normalized
 `Papers/` notes.
 
+For long single-file research catalogs, section notes should use folder-note style so both the
+filesystem and Obsidian graph reveal the hierarchy, such as
+`Guides/<topic>/sections/1-functionality/1-functionality.md` and nested child folders below it.
+The main guide should link only to top-level section notes. Parent section notes should link to
+their immediate child sections rather than directly to papers. When a parent section also contains
+its own paper bullets, PaperHub should create a generated `overview/overview.md` child note for
+those papers so the visible graph stays `main guide -> sections -> subsections -> papers`.
+
 ## Markdown Import Contract
 
 `paperhub import markdown` should transform heterogeneous source content into the same output structure:
@@ -97,7 +103,8 @@ section notes should carry focused imported or generated material and link back 
 ```text
 source paper digest -> Papers/<citation-key>.md
 source guide file   -> Guides/<topic>/<main-or-section>.md
-source subfolder    -> Guides/<topic>/<section>/
+source section       -> Guides/<topic>/sections/<section>/<section>.md
+source subfolder    -> Guides/<topic>/sections/<section>/
 ```
 
 The importer should report files it cannot classify or reconcile. It should never copy a source tree directly into the vault or preserve arbitrary source structure outside the normalized `Guides/<topic>/` contract. Generated import output must not link to files outside the current vault. Local source links, absolute paths, repository images, attachments, and provenance paths should be stripped, rewritten to vault-local `Papers/` or `Guides/` links, or represented as non-link text. Web URLs may remain links.
@@ -125,4 +132,4 @@ The manifest should contain only this typed edge for now. It is intended for Neo
 
 ## Visualization Boundary
 
-The first implementation should not treat Obsidian's global file-link graph as a semantic knowledge graph. PaperHub should first model and validate explicit relationships. The initial displayed graph should show only `guide-section-cites-paper` edges; broader relationships such as `topic-contains-paper`, `paper-cites-paper`, and `zotero-item-backs-paper` can come later after they are modeled and validated.
+The first implementation should not treat Obsidian's global file-link graph as a semantic knowledge graph. PaperHub should first model and validate explicit relationships. Generated guide wikilinks should still avoid hub-and-spoke noise: main guides link to top-level sections, parent sections link to children, and only leaf or generated overview sections link to paper notes. The initial semantic graph should show only `guide-section-cites-paper` edges; broader relationships such as `topic-contains-paper`, `paper-cites-paper`, and `zotero-item-backs-paper` can come later after they are modeled and validated.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from paperhub.models import (
@@ -25,9 +27,40 @@ from paperhub.text import (
     extract_user_notes,
     normalize_doi_value,
     normalize_title,
+    normalize_url_value,
     short_hash,
+    slugify,
     title_from_markdown,
 )
+
+
+@dataclass
+class _MarkdownHeading:
+    level: int
+    title: str
+    line_index: int
+
+
+@dataclass
+class _SplitGuideSection:
+    title: str
+    slug: str
+    level: int
+    body: str
+    source_path: str
+    paper_keys: list[str] = field(default_factory=list)
+    paper_paths: list[str] = field(default_factory=list)
+    target_path: str = ""
+    parent_path: str = ""
+    child_paths: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _PaperBullet:
+    title: str
+    body: str
+    url: str = ""
+    year: int | None = None
 
 
 def build_markdown_import_plan(
@@ -35,6 +68,7 @@ def build_markdown_import_plan(
     topic_name: str,
     index: PaperHubIndex,
     *,
+    goal: str = "",
     dry_run: bool = True,
     on_missing_paper: MissingPaperAction = "report",
 ) -> MarkdownImportPlan:
@@ -97,6 +131,46 @@ def build_markdown_import_plan(
 
         if classification == "topic-guide":
             main_guide_sources.append(relative_path)
+            split_sections, main_guide_body = _split_topic_guide_taxonomy(
+                content=content,
+                source_path=relative_path,
+                topic=topic,
+                index=index,
+                on_missing_paper=on_missing_paper,
+                planned_writes=planned_writes,
+                review_items=review_items,
+                staged_papers=staged_papers,
+            )
+            for split_section in split_sections:
+                paper_keys.extend(split_section.paper_keys)
+                sections.append(
+                    GuideSection(
+                        title=split_section.title,
+                        slug=split_section.slug,
+                        kind="paper-backed" if split_section.paper_keys else "support-note",
+                        paper_keys=split_section.paper_keys,
+                        body=split_section.body,
+                        review_required=not split_section.paper_keys
+                        and not split_section.child_paths,
+                    )
+                )
+                planned_writes.append(
+                    PlannedMarkdownWrite(
+                        target_surface="Guides",
+                        target_path=split_section.target_path,
+                        kind="guide-section",
+                        source_paths=[relative_path],
+                        paper_keys=split_section.paper_keys,
+                        paper_paths=split_section.paper_paths,
+                        review_required=not split_section.paper_keys
+                        and not split_section.child_paths,
+                        title=split_section.title,
+                        body=split_section.body,
+                        section_level=split_section.level,
+                        parent_path=split_section.parent_path,
+                        child_paths=split_section.child_paths,
+                    )
+                )
             planned_writes.append(
                 PlannedMarkdownWrite(
                     target_surface="Guides",
@@ -105,6 +179,8 @@ def build_markdown_import_plan(
                     source_paths=[relative_path],
                     paper_keys=candidate_paper_keys,
                     paper_paths=candidate_paper_paths,
+                    title=title,
+                    body=main_guide_body,
                 )
             )
         elif classification in {"guide-section", "guide-support-note"}:
@@ -113,10 +189,14 @@ def build_markdown_import_plan(
                 kind="paper-backed" if candidate_paper_keys else "support-note",
                 paper_keys=candidate_paper_keys,
             )
-            section_target_path = f"{topic.guide_folder}/sections/{section.filename}"
+            section_target_path = (
+                f"{topic.guide_folder}/sections/{section.slug}/{section.filename}"
+            )
             if _planned_target_exists(planned_writes, section_target_path):
                 section.slug = f"{section.slug}-{short_hash(relative_path)}"
-                section_target_path = f"{topic.guide_folder}/sections/{section.filename}"
+                section_target_path = (
+                    f"{topic.guide_folder}/sections/{section.slug}/{section.filename}"
+                )
             sections.append(section)
             planned_writes.append(
                 PlannedMarkdownWrite(
@@ -127,6 +207,9 @@ def build_markdown_import_plan(
                     paper_keys=candidate_paper_keys,
                     paper_paths=candidate_paper_paths,
                     review_required=not candidate_paper_keys,
+                    title=title,
+                    body=content,
+                    section_level=1,
                 )
             )
             if not candidate_paper_keys:
@@ -187,12 +270,18 @@ def build_markdown_import_plan(
 
     guide = Guide(
         topic=topic,
+        purpose=(
+            f"Source-derived baseline for the user research goal: {goal}"
+            if goal
+            else ""
+        ),
         sections=sections,
         paper_keys=sorted(set(paper_keys)),
     )
     return MarkdownImportPlan(
         source_path=str(source),
         topic=topic,
+        goal=goal,
         dry_run=dry_run,
         on_missing_paper=on_missing_paper,
         discovered_files=discovered_files,
@@ -332,6 +421,388 @@ def _plan_paper_digest_write(
     )
 
 
+def _split_topic_guide_taxonomy(
+    *,
+    content: str,
+    source_path: str,
+    topic: Topic,
+    index: PaperHubIndex,
+    on_missing_paper: MissingPaperAction,
+    planned_writes: list[PlannedMarkdownWrite],
+    review_items: list[MarkdownImportReviewItem],
+    staged_papers: list[Paper],
+) -> tuple[list[_SplitGuideSection], str]:
+    lines = content.splitlines()
+    headings = _markdown_headings(lines)
+    paperlist_heading = next(
+        (
+            heading
+            for heading in headings
+            if "paperlist" in normalize_title(heading.title).replace(" ", "")
+        ),
+        None,
+    )
+    if not paperlist_heading:
+        return [], ""
+
+    taxonomy_headings = [
+        heading
+        for heading in headings
+        if heading.line_index > paperlist_heading.line_index
+        and _numbered_taxonomy_title(heading.title)
+    ]
+    if not taxonomy_headings:
+        return [], ""
+
+    first_heading = taxonomy_headings[0]
+    taxonomy_end = len(lines)
+    for heading in headings:
+        if heading.line_index <= first_heading.line_index:
+            continue
+        if heading.level == 1 and not _numbered_taxonomy_title(heading.title):
+            taxonomy_end = heading.line_index
+            break
+
+    taxonomy_headings = [
+        heading for heading in taxonomy_headings if heading.line_index < taxonomy_end
+    ]
+    main_guide_body = "\n".join(
+        lines[: paperlist_heading.line_index] + lines[taxonomy_end:]
+    ).strip()
+    sections = _build_split_guide_sections(
+        lines=lines,
+        taxonomy_headings=taxonomy_headings,
+        taxonomy_end=taxonomy_end,
+        source_path=source_path,
+        topic=topic,
+        index=index,
+        on_missing_paper=on_missing_paper,
+        planned_writes=planned_writes,
+        review_items=review_items,
+        staged_papers=staged_papers,
+    )
+    return _move_parent_paper_links_to_overview(sections), main_guide_body
+
+
+def _build_split_guide_sections(
+    *,
+    lines: list[str],
+    taxonomy_headings: list[_MarkdownHeading],
+    taxonomy_end: int,
+    source_path: str,
+    topic: Topic,
+    index: PaperHubIndex,
+    on_missing_paper: MissingPaperAction,
+    planned_writes: list[PlannedMarkdownWrite],
+    review_items: list[MarkdownImportReviewItem],
+    staged_papers: list[Paper],
+) -> list[_SplitGuideSection]:
+    sections: list[_SplitGuideSection] = []
+    stack: list[_SplitGuideSection] = []
+    sibling_slugs_by_parent: dict[str, set[str]] = {}
+
+    for position, heading in enumerate(taxonomy_headings):
+        next_heading_line = (
+            taxonomy_headings[position + 1].line_index
+            if position + 1 < len(taxonomy_headings)
+            else taxonomy_end
+        )
+        body = "\n".join(lines[heading.line_index + 1 : next_heading_line]).strip()
+        level = _taxonomy_depth(heading.title)
+        base_slug = slugify(_clean_heading_title(heading.title))
+
+        while stack and stack[-1].level >= level:
+            stack.pop()
+        parent = stack[-1] if stack else None
+        parent_path = parent.target_path if parent else ""
+        parent_folder = (
+            Path(parent.target_path).parent if parent else Path(topic.guide_folder) / "sections"
+        )
+        slug = _unique_section_slug(base_slug, parent_path, sibling_slugs_by_parent)
+        target_path = (parent_folder / slug / f"{slug}.md").as_posix()
+
+        paper_keys: list[str] = []
+        paper_paths: list[str] = []
+        for bullet in _paper_bullets_from_section(body):
+            bullet_keys, bullet_paths = _resolve_or_stage_paper_bullet(
+                bullet=bullet,
+                source_path=source_path,
+                index=index,
+                topic=topic,
+                on_missing_paper=on_missing_paper,
+                planned_writes=planned_writes,
+                review_items=review_items,
+                staged_papers=staged_papers,
+            )
+            paper_keys.extend(bullet_keys)
+            paper_paths.extend(bullet_paths)
+
+        section = _SplitGuideSection(
+            title=_clean_heading_title(heading.title),
+            slug=slug,
+            level=level,
+            body=body,
+            source_path=source_path,
+            paper_keys=_dedupe_preserving_order(paper_keys),
+            paper_paths=_dedupe_preserving_order(paper_paths),
+            target_path=target_path,
+            parent_path=parent_path,
+        )
+        if parent:
+            parent.child_paths.append(target_path)
+        sections.append(section)
+        stack.append(section)
+
+    return sections
+
+
+def _move_parent_paper_links_to_overview(
+    sections: list[_SplitGuideSection],
+) -> list[_SplitGuideSection]:
+    output: list[_SplitGuideSection] = []
+    for section in sections:
+        output.append(section)
+        if not section.child_paths or not section.paper_keys:
+            continue
+        overview_path = (Path(section.target_path).parent / "overview" / "overview.md").as_posix()
+        overview = _SplitGuideSection(
+            title=f"{section.title} Overview",
+            slug="overview",
+            level=section.level + 1,
+            body=section.body,
+            source_path=section.source_path,
+            paper_keys=section.paper_keys,
+            paper_paths=section.paper_paths,
+            target_path=overview_path,
+            parent_path=section.target_path,
+        )
+        section.child_paths = [overview_path, *section.child_paths]
+        section.paper_keys = []
+        section.paper_paths = []
+        section.body = ""
+        output.append(overview)
+    return output
+
+
+def _resolve_or_stage_paper_bullet(
+    *,
+    bullet: _PaperBullet,
+    source_path: str,
+    index: PaperHubIndex,
+    topic: Topic,
+    on_missing_paper: MissingPaperAction,
+    planned_writes: list[PlannedMarkdownWrite],
+    review_items: list[MarkdownImportReviewItem],
+    staged_papers: list[Paper],
+) -> tuple[list[str], list[str]]:
+    candidate_paper_keys = _candidate_paper_keys_for_bullet(bullet, index.papers)
+    if len(candidate_paper_keys) == 1:
+        paper = next(
+            (paper for paper in index.papers if paper.key == candidate_paper_keys[0]),
+            None,
+        )
+        if paper:
+            return [paper.key], [f"Papers/{_paper_filename_for_index(index.papers, paper)}.md"]
+    if len(candidate_paper_keys) > 1:
+        review_items.append(
+            MarkdownImportReviewItem(
+                category="ambiguous-paper-match",
+                source_path=source_path,
+                message=f"Paper bullet `{bullet.title}` matched multiple existing papers.",
+                candidate_targets=candidate_paper_keys,
+            )
+        )
+        return candidate_paper_keys, _paper_paths_for_keys(index.papers, candidate_paper_keys)
+
+    if on_missing_paper == "report":
+        review_items.append(
+            MarkdownImportReviewItem(
+                category="ambiguous-paper-match",
+                source_path=source_path,
+                message=(
+                    f"Paper bullet `{bullet.title}` did not match an existing paper; "
+                    "rerun with --on-missing-paper stage to stage it."
+                ),
+            )
+        )
+        return [], []
+
+    key = _staged_paper_key_for_bullet(bullet)
+    staged_paper = Paper(
+        key=key,
+        title=bullet.title,
+        url=bullet.url,
+        topics=[topic.name],
+    )
+    staged_papers.append(staged_paper)
+    target = f"Papers/{paper_filename(staged_paper)}.md"
+    planned_writes.append(
+        PlannedMarkdownWrite(
+            target_surface="Papers",
+            target_path=target,
+            kind="paper-note",
+            source_paths=[source_path],
+            paper_keys=[key],
+            paper_paths=[target],
+            review_required=True,
+            title=bullet.title,
+            body=bullet.body,
+        )
+    )
+    review_items.append(
+        MarkdownImportReviewItem(
+            category="ambiguous-paper-match",
+            source_path=source_path,
+            message=(
+                f"Paper bullet `{bullet.title}` was staged under {target}; reconcile it "
+                "with Zotero before treating it as a canonical paper."
+            ),
+            candidate_targets=[target, topic.guide_folder],
+        )
+    )
+    return [key], [target]
+
+
+def _markdown_headings(lines: list[str]) -> list[_MarkdownHeading]:
+    headings: list[_MarkdownHeading] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            headings.append(
+                _MarkdownHeading(
+                    level=len(match.group(1)),
+                    title=match.group(2).strip(),
+                    line_index=index,
+                )
+            )
+    return headings
+
+
+def _numbered_taxonomy_title(title: str) -> bool:
+    return bool(re.match(r"^\s*\d+(?:\.\d+)*\.?\s+\S+", _clean_heading_title(title)))
+
+
+def _taxonomy_depth(title: str) -> int:
+    match = re.match(r"^\s*(\d+(?:\.\d+)*)", _clean_heading_title(title))
+    if not match:
+        return 1
+    return len(match.group(1).split("."))
+
+
+def _clean_heading_title(title: str) -> str:
+    return re.sub(r"^[^\w\d]+", "", title).strip()
+
+
+def _unique_section_slug(
+    base_slug: str, parent_path: str, sibling_slugs_by_parent: dict[str, set[str]]
+) -> str:
+    siblings = sibling_slugs_by_parent.setdefault(parent_path, set())
+    slug = base_slug or "section"
+    if slug in siblings:
+        slug = f"{slug}-{short_hash(parent_path + '/' + base_slug)}"
+    siblings.add(slug)
+    return slug
+
+
+def _paper_bullets_from_section(body: str) -> list[_PaperBullet]:
+    lines = body.splitlines()
+    bullets: list[_PaperBullet] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = re.match(r"^\s*[-*]\s+\*\*(.+?)\*\*", line)
+        if not match:
+            index += 1
+            continue
+        block_lines = [line]
+        index += 1
+        while index < len(lines):
+            candidate = lines[index]
+            if re.match(r"^\s*[-*]\s+\*\*", candidate) or re.match(r"^#{1,6}\s+", candidate):
+                break
+            block_lines.append(candidate)
+            index += 1
+        block = "\n".join(block_lines).strip()
+        title = re.sub(r"\s+", " ", match.group(1)).strip()
+        bullets.append(
+            _PaperBullet(
+                title=title,
+                body=block,
+                url=_extract_paper_url(block),
+                year=_extract_year(block),
+            )
+        )
+    return bullets
+
+
+def _candidate_paper_keys_for_bullet(bullet: _PaperBullet, papers: list[Paper]) -> list[str]:
+    content = f"{bullet.title}\n{bullet.body}\n{bullet.url}"
+    key_matches = [
+        paper.key
+        for paper in papers
+        if paper.key and re.search(rf"\b{re.escape(paper.key)}\b", content)
+    ]
+    if key_matches:
+        return sorted(set(key_matches))
+
+    doi = _extract_doi(content)
+    doi_matches = [
+        paper.key
+        for paper in papers
+        if doi and paper.doi and normalize_doi_value(doi) == normalize_doi_value(paper.doi)
+    ]
+    if doi_matches:
+        return sorted(set(doi_matches))
+
+    normalized_url = normalize_url_value(bullet.url)
+    url_matches = [
+        paper.key
+        for paper in papers
+        if normalized_url
+        and paper.url
+        and normalize_url_value(paper.url) == normalized_url
+    ]
+    if url_matches:
+        return sorted(set(url_matches))
+
+    normalized_title = normalize_title(bullet.title)
+    title_matches = [
+        paper.key
+        for paper in papers
+        if normalized_title and normalize_title(paper.title) == normalized_title
+    ]
+    return sorted(set(title_matches))
+
+
+def _extract_paper_url(block: str) -> str:
+    paper_link = re.search(r"\[\s*Paper\s*\]\(([^)]+)\)", block, flags=re.IGNORECASE)
+    if paper_link:
+        return paper_link.group(1).strip()
+    generic_link = re.search(r"https?://[^\s)\]]+", block)
+    return generic_link.group(0).rstrip(".,);") if generic_link else ""
+
+
+def _extract_year(block: str) -> int | None:
+    match = re.search(r"\b(19|20)\d{2}\b", block)
+    return int(match.group(0)) if match else None
+
+
+def _staged_paper_key_for_bullet(bullet: _PaperBullet) -> str:
+    identity = normalize_title(bullet.title) or normalize_url_value(bullet.url) or bullet.body
+    return f"IMPORTED-{short_hash(identity)}"
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        output.append(value)
+    return output
+
+
 def _classify_markdown(
     content: str,
     headings: list[str],
@@ -455,10 +926,28 @@ def _merge_duplicate_writes(writes: list[PlannedMarkdownWrite]) -> list[PlannedM
             None,
         )
         if existing:
-            existing.source_paths = sorted(set(existing.source_paths + write.source_paths))
-            existing.paper_keys = sorted(set(existing.paper_keys + write.paper_keys))
-            existing.paper_paths = sorted(set(existing.paper_paths + write.paper_paths))
+            existing.source_paths = _dedupe_preserving_order(
+                existing.source_paths + write.source_paths
+            )
+            existing.paper_keys = _dedupe_preserving_order(
+                existing.paper_keys + write.paper_keys
+            )
+            existing.paper_paths = _dedupe_preserving_order(
+                existing.paper_paths + write.paper_paths
+            )
             existing.review_required = existing.review_required or write.review_required
+            existing.child_paths = _dedupe_preserving_order(
+                existing.child_paths + write.child_paths
+            )
+            existing.title = existing.title or write.title
+            existing.parent_path = existing.parent_path or write.parent_path
+            existing.section_level = existing.section_level or write.section_level
+            if write.body and write.body not in existing.body:
+                existing.body = (
+                    f"{existing.body.rstrip()}\n\n{write.body.strip()}".strip()
+                    if existing.body
+                    else write.body
+                )
             continue
         output.append(write)
     return output
@@ -565,12 +1054,32 @@ def _remove_stale_generated_sections(vault: Path, plan: MarkdownImportPlan) -> N
     section_dir = vault / plan.topic.guide_folder / "sections"
     if not section_dir.exists():
         return
-    for path in section_dir.glob("*.md"):
+    for path in section_dir.rglob("*.md"):
         relative_path = path.relative_to(vault).as_posix()
         if relative_path in planned_section_paths:
             continue
         if _is_generated_markdown_without_user_notes(path):
             path.unlink()
+            continue
+        plan.review_items.append(
+            MarkdownImportReviewItem(
+                category="unsupported-structure",
+                source_path=relative_path,
+                message=(
+                    "Stale generated guide section has user notes or non-generated "
+                    "content; left it in place during reimport."
+                ),
+            )
+        )
+    for directory in sorted(
+        (path for path in section_dir.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
     try:
         section_dir.rmdir()
     except OSError:
@@ -604,9 +1113,7 @@ def _write_root_readme(vault: Path, plan: MarkdownImportPlan) -> None:
 
 ## Indexes
 
-- [[00 Home]]
-- [[01 Reading Dashboard]]
-- [[02 Paper Index]]
+- [[PaperIndex]]
 
 <!-- paperhub:generated:end -->
 
@@ -643,20 +1150,26 @@ def _source_title(source_root: Path, source_path: str) -> str:
 
 def _render_main_guide(plan: MarkdownImportPlan) -> str:
     guide = plan.guide or Guide(topic=plan.topic)
-    section_lines = []
-    for write in plan.planned_writes:
-        if write.kind == "guide-section":
-            title = Path(write.target_path).stem.replace("-", " ").title()
-            section_lines.append(f"- [[{write.target_path.removesuffix('.md')}|{title}]]")
-    paper_lines = _paper_link_lines(plan.planned_writes, guide.paper_keys)
+    section_lines = _top_level_section_lines(plan)
     review_lines = [
         f"- {item.severity}: {item.category} - {item.message}" for item in plan.review_items
     ]
     imported_guide_material = _imported_main_guide_material(Path(plan.source_path), plan)
+    goal_block = (
+        plan.goal
+        if plan.goal
+        else "_No user research goal was provided for this import._"
+    )
+    synthesis_brief = (
+        _task_aware_synthesis_brief(plan)
+        if plan.goal
+        else "_Add `--goal` to create an agent-ready synthesis brief for this source._"
+    )
     return f"""---
 type: guide
 topic: {plan.topic.name}
 topic_slug: {plan.topic.slug}
+goal: {json.dumps(plan.goal, ensure_ascii=False)}
 paper_keys: {guide.paper_keys}
 ---
 
@@ -668,17 +1181,21 @@ paper_keys: {guide.paper_keys}
 
 {guide.purpose or "_Imported guide scaffold. Review and refine scope._"}
 
-## Imported Guide Material
+## User Research Goal
+
+{goal_block}
+
+## Agent Synthesis Brief
+
+{synthesis_brief}
+
+## Source-Derived Baseline
 
 {imported_guide_material}
 
 ## Reading Structure
 
 {chr(10).join(section_lines) or "_No guide sections imported yet._"}
-
-## Paper Links
-
-{chr(10).join(paper_lines) or "_No paper links resolved yet._"}
 
 ## Open Questions
 
@@ -690,6 +1207,42 @@ paper_keys: {guide.paper_keys}
 """
 
 
+def _task_aware_synthesis_brief(plan: MarkdownImportPlan) -> str:
+    return "\n".join(
+        [
+            "Use this imported source as evidence, not as the final outline.",
+            "Reorganize the reading path around the user's role, constraints, and target artifact.",
+            (
+                "Prefer a small ordered set of paper-backed sections over the source "
+                "repository taxonomy."
+            ),
+            (
+                "Every recommended paper should resolve to a normalized `Papers/` note "
+                "or a staged imported paper."
+            ),
+            (
+                "Codex, Claude Code, an MCP client, or a future PaperHub service can own "
+                "the open-ended synthesis step; PaperHub core owns extraction, "
+                "reconciliation, vault writes, and validation."
+            ),
+        ]
+    )
+
+
+def _top_level_section_lines(plan: MarkdownImportPlan) -> list[str]:
+    section_writes = [write for write in plan.planned_writes if write.kind == "guide-section"]
+    top_level_writes = [write for write in section_writes if not write.parent_path]
+
+    def sort_key(write: PlannedMarkdownWrite) -> tuple[int, str]:
+        return (write.section_level or 999, write.target_path)
+
+    lines: list[str] = []
+    for child in sorted(top_level_writes, key=sort_key):
+        label = child.title or Path(child.target_path).stem.replace("-", " ").title()
+        lines.append(f"- [[{child.target_path.removesuffix('.md')}|{label}]]")
+    return lines
+
+
 def _imported_main_guide_material(source_root: Path, plan: MarkdownImportPlan) -> str:
     blocks = []
     source_number = 0
@@ -698,10 +1251,7 @@ def _imported_main_guide_material(source_root: Path, plan: MarkdownImportPlan) -
             continue
         for source_path in write.source_paths:
             source_number += 1
-            content = _source_text(source_root, source_path)
-            content = _rewrite_local_markdown_links_to_papers(
-                content, source_path, source_root, plan
-            )
+            content = write.body if write.body else _source_text(source_root, source_path)
             content = _remove_non_vault_file_references(content)
             content = content.strip()
             if content:
@@ -713,16 +1263,33 @@ def _render_guide_section(
     source_root: Path, write: PlannedMarkdownWrite, plan: MarkdownImportPlan
 ) -> str:
     source_path = write.source_paths[0] if write.source_paths else ""
-    title = _source_title(source_root, source_path) if source_path else Path(write.target_path).stem
-    content = _source_text(source_root, source_path) if source_path else ""
+    title = (
+        write.title
+        or (
+            _source_title(source_root, source_path)
+            if source_path
+            else Path(write.target_path).stem
+        )
+    )
+    content = (
+        write.body
+        if write.body
+        else (_source_text(source_root, source_path) if source_path else "")
+    )
     content = _rewrite_local_markdown_links_to_papers(content, source_path, source_root, plan)
     content = _remove_non_vault_file_references(content)
-    paper_lines = _write_paper_link_lines(write)
+    paper_lines = [] if write.child_paths else _write_paper_link_lines(write)
+    child_lines = [
+        f"- [[{path.removesuffix('.md')}|{Path(path).stem.replace('-', ' ').title()}]]"
+        for path in write.child_paths
+    ]
     return f"""---
 type: guide-section
 topic: {plan.topic.name}
 topic_slug: {plan.topic.slug}
 paper_keys: {write.paper_keys}
+parent: {write.parent_path}
+children: {write.child_paths}
 ---
 
 # {title}
@@ -732,6 +1299,10 @@ paper_keys: {write.paper_keys}
 ## Paper Links
 
 {chr(10).join(paper_lines) or "_No paper links resolved yet._"}
+
+## Child Sections
+
+{chr(10).join(child_lines) or "_No child sections._"}
 
 ## Imported Material
 
@@ -747,9 +1318,20 @@ def _render_imported_paper_note(
     source_root: Path, write: PlannedMarkdownWrite, topic: Topic
 ) -> str:
     source_path = write.source_paths[0] if write.source_paths else ""
-    title = _source_title(source_root, source_path) if source_path else Path(write.target_path).stem
+    title = (
+        write.title
+        or (
+            _source_title(source_root, source_path)
+            if source_path
+            else Path(write.target_path).stem
+        )
+    )
     key = write.paper_keys[0] if write.paper_keys else ""
-    digest = _imported_paper_digest_blocks(source_root, write.source_paths)
+    digest = (
+        _remove_non_vault_file_references(write.body.strip())
+        if write.body
+        else _imported_paper_digest_blocks(source_root, write.source_paths)
+    )
     return f"""---
 type: paper
 title: {title}
@@ -993,9 +1575,13 @@ def _write_imported_paper_note(
             rendered = _render_imported_paper_note(source_root, write, topic)
             target.write_text(_preserve_user_notes(rendered, existing), encoding="utf-8")
             return
-        for source_path in write.source_paths:
-            content = _source_text(source_root, source_path)
-            existing = _merge_imported_digest(existing, source_path, content)
+        if write.body:
+            source_id = write.source_paths[0] if write.source_paths else write.target_path
+            existing = _merge_imported_digest(existing, source_id, write.body)
+        else:
+            for source_path in write.source_paths:
+                content = _source_text(source_root, source_path)
+                existing = _merge_imported_digest(existing, source_path, content)
         target.write_text(existing, encoding="utf-8")
         return
     target.write_text(_render_imported_paper_note(source_root, write, topic), encoding="utf-8")

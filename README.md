@@ -27,6 +27,7 @@ paperhub init
 paperhub zotero connect
 paperhub zotero sync
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge"
+paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --goal "I need an agent benchmark reading path."
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --apply
 paperhub paper enrich smith2024attention --mode quick
 paperhub zotero push-staged
@@ -59,6 +60,7 @@ paperhub obsidian connect             # record a local vault path
 paperhub zotero connect               # save Zotero settings
 paperhub zotero sync                  # sync Zotero into Papers/
 paperhub import markdown SOURCE       # preview a processed import
+paperhub import markdown SOURCE --goal "research task prompt"
 paperhub import markdown SOURCE --apply
 paperhub paper enrich PAPER --mode quick
 paperhub zotero push-staged           # dry-run Zotero creation for staged imports
@@ -68,12 +70,17 @@ paperhub mcp serve
 
 `paperhub import markdown` previews by default and writes only with `--apply`. `paperhub zotero push-staged` is also a dry run unless `--write` is passed.
 
+Pass `--goal` when the import should carry a user task prompt for Codex, Claude Code, an MCP client, or a future local synthesis service. Deterministic import still preserves a source-derived baseline without requiring a model call.
+
+Markdown imports build a navigable guide hierarchy: the main guide links only to top-level sections,
+sections link to subsections, and paper links live only on leaf sections or generated
+`overview/overview.md` child notes. This keeps Obsidian's graph from turning the main guide into a
+paper-link hub.
+
 ## Generated Vault Shape
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 README.md
 
 Papers/

@@ -38,6 +38,7 @@ Import an existing Markdown research source:
 
 ```bash
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge"
+paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --goal "I need an agent benchmark reading path."
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --apply
 ```
 
@@ -74,6 +75,7 @@ paperhub mcp serve
 - Keep paper-level digest, annotations, synthesis content, citation data, and user notes inside the corresponding `Papers/` note.
 - Treat Obsidian as the Markdown and visualization surface.
 - Use `paperhub import markdown` only as a processed import. It previews by default; use `--apply` only after reviewing the plan. Never copy an external Markdown tree directly into the vault.
+- Use `--goal` for user question driven imports. Treat it as task-specific prompt input for Codex, Claude Code, MCP, or a future synthesis service; do not store it in `.env`.
 - Never let Markdown import output reference files outside the current vault. Strip or rewrite local source links, absolute paths, repository images, attachments, and provenance paths; preserve web URLs.
 - Write paper-like content to `Papers/` and translate guide-like content into the standard `Guides/<topic>/` format.
 - Use `paperhub paper enrich` for evidence-first single-paper work. It only resolves indexed papers by Zotero key, Better BibTeX citation key, or paper-note stem; do not fall back to web search or arbitrary paths.

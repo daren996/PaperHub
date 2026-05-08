@@ -46,15 +46,13 @@ Codex / Claude Code continuously maintain it
 After opening Obsidian, the user should see a research cockpit rather than a pile of files:
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 
 Papers/
 Guides/
 ```
 
-`Papers/` stores normalized paper notes. `Guides/` stores one folder per topic, with a main guide plus meaningful section notes when the topic is substantial. The guide is the user-facing reading or survey artifact, and its literature-backed sections should link back to `Papers/`.
+`Papers/` stores normalized paper notes. `Guides/` stores one folder per topic, with a main guide plus meaningful section notes when the topic is substantial. The guide is the user-facing reading or survey artifact: main guides link to top-level sections, parent sections link to child sections, and only leaf or generated overview sections link back to `Papers/`.
 
 ## MVP
 

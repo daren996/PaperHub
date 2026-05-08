@@ -36,7 +36,7 @@ cp .env.example .env
 paperhub init
 paperhub zotero connect
 paperhub zotero sync
-paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge"
+paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --goal "I need an agent benchmark reading path."
 paperhub doctor
 ```
 
@@ -72,6 +72,10 @@ The following points came from early design corrections and should be treated as
 - Do not hard-code personal absolute paths such as `/Users/<name>/...` in reusable defaults, examples, or generated config. Prefer `~`, `/path/to/...`, or explicit user-provided arguments.
 - `PAPERHUB_VAULT` is persistent configuration because it names the local Obsidian vault that PaperHub writes to.
 - PaperHub supports processed Markdown import through `paperhub import markdown`. This must never be a raw copy. It must parse, normalize, deduplicate, and write into PaperHub's vault structure.
+- Markdown import may accept a task-specific `--goal` prompt describing the user's role, constraints, and research question. This prompt is one-off task input, not persistent config. PaperHub core should store it in the import plan/guide and expose it to Codex, Claude Code, MCP clients, or future synthesis services; open-ended task-aware synthesis should not be buried as opaque core logic.
+- Keep deterministic Markdown import as a baseline capability even when agent-generated synthesis is added. A user should be able to import source Markdown into a sanitized, vault-local PaperHub guide without requiring Codex, Claude Code, or another model call.
+- Prompt-driven research synthesis is a separate agent-assisted workflow layered on top of import. The user may provide a task prompt such as their role, goal, data scale, benchmark need, or reading question; Codex / Claude Code should use PaperHub's parsed source material, paper index, and vault-writing contracts to generate a new task-aware guide rather than merely copying the imported Markdown.
+- Do not make PaperHub core depend on one proprietary model or editor. Core should expose structured source extraction, paper reconciliation, guide write plans, prompt/context packages, and validation; Codex, Claude Code, MCP clients, or future local services can perform the open-ended synthesis step.
 - Do not add Markdown source paths to `.env`; Markdown import sources are task-specific inputs passed to the command or agent workflow.
 - Generated output from Markdown import must not reference files outside the current Obsidian vault. Local source links, absolute paths, images, attachments, and provenance paths that point outside the vault should be stripped, rewritten to vault-local `Papers/` or `Guides/` links, or represented as non-link text. Web URLs are acceptable, but local file references are not.
 - Imported paper content belongs in `Papers/`. Imported or generated teaching/survey/guide content belongs in `Guides/<topic>/`, with backlinks to the normalized paper notes in `Papers/`.
@@ -124,8 +128,13 @@ Both should still call PaperHub core logic rather than duplicating it.
 
 For the current MVP, keep the user-visible generated vault surface focused on:
 
+- `PaperIndex.md`
 - `Papers/`
 - `Guides/`
+
+`PaperIndex.md` is the single generated root entry that combines the home summary, reading dashboard,
+topic guide links, and paper filename-to-title index. Do not generate separate `00 Home.md`,
+`01 Reading Dashboard.md`, or `02 Paper Index.md` root entry files.
 
 `Papers/` owns normalized paper notes. Paper-level digest, annotations, synthesis sections, citation
 data, BibTeX, Zotero collections, tags, notes, attachment metadata, relations, sync versions, and
@@ -236,6 +245,8 @@ back to the normalized paper notes in `Papers/`.
 - Keep generated files deterministic where practical.
 - Add tests around schema conversion, Zotero sync behavior, and Markdown generation.
 - Keep templates understandable to a researcher who opens them directly.
+- Before implementing a user-facing change, identify which README, docs, examples, skills, templates, or help text will need to change, and keep them in sync before finishing the task.
+- When changing user-visible behavior, CLI commands, configuration, generated vault output, schemas, or integration workflows, update the relevant documentation in the same change.
 - After changing CLI semantics, update `--help`, README, skills, and project docs together.
 - If examples need a concrete path, use placeholder paths or `~` unless the path is intentionally documenting a user-provided source.
 

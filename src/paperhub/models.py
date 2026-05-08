@@ -265,6 +265,11 @@ class PlannedMarkdownWrite(BaseModel):
     paper_keys: list[str] = Field(default_factory=list)
     paper_paths: list[str] = Field(default_factory=list)
     review_required: bool = False
+    title: str = ""
+    body: str = ""
+    section_level: int = 0
+    parent_path: str = ""
+    child_paths: list[str] = Field(default_factory=list)
 
     @field_validator("target_path")
     @classmethod
@@ -296,6 +301,7 @@ class GuideSectionCitesPaper(BaseModel):
 class MarkdownImportPlan(BaseModel):
     source_path: str
     topic: Topic
+    goal: str = ""
     dry_run: bool = True
     on_missing_paper: MissingPaperAction = "report"
     discovered_files: list[MarkdownSourceFile] = Field(default_factory=list)

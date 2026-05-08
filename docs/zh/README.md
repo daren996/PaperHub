@@ -25,6 +25,7 @@ paperhub init
 paperhub zotero connect
 paperhub zotero sync
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge"
+paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --goal "我需要为 agent benchmark 制定阅读路线。"
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --apply
 paperhub paper enrich smith2024attention --mode quick
 paperhub zotero push-staged
@@ -57,6 +58,7 @@ paperhub obsidian connect             # 记录本地 vault path
 paperhub zotero connect               # 保存 Zotero 设置
 paperhub zotero sync                  # 同步 Zotero 到 Papers/
 paperhub import markdown SOURCE       # 预览 processed import
+paperhub import markdown SOURCE --goal "research task prompt"
 paperhub import markdown SOURCE --apply
 paperhub paper enrich PAPER --mode quick
 paperhub zotero push-staged           # 预览 staged imports 的 Zotero 创建
@@ -66,12 +68,12 @@ paperhub mcp serve
 
 `paperhub import markdown` 默认只预览，只有传 `--apply` 才写入。`paperhub zotero push-staged` 默认也是 dry run，只有传 `--write` 才写 Zotero。
 
+当 import 需要携带用户研究任务或问题时，使用 `--goal`。PaperHub 会把这个 prompt 写入 import plan 和 guide，供 Codex、Claude Code、MCP client 或未来 local synthesis service 做 task-aware synthesis；确定性 import 仍可不调用模型。
+
 ## 生成的 Vault 形状
 
 ```text
-00 Home.md
-01 Reading Dashboard.md
-02 Paper Index.md
+PaperIndex.md
 README.md
 
 Papers/

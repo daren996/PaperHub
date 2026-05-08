@@ -55,7 +55,7 @@ app.add_typer(obsidian_app, name="obsidian")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(paper_app, name="paper")
 app.add_typer(import_app, name="import")
-console = Console()
+console = Console(width=200)
 
 
 VaultOption = Annotated[
@@ -268,6 +268,17 @@ def import_markdown(
         typer.Argument(help="One-off Markdown file or directory to process into the vault."),
     ],
     topic: Annotated[str, typer.Option("--topic", help="Topic guide name for Guides/<topic>.")],
+    goal: Annotated[
+        str,
+        typer.Option(
+            "--goal",
+            help=(
+                "Optional user research goal or task prompt for agent-driven guide synthesis. "
+                "Stored in the import plan and generated guide; deterministic import still "
+                "works without an LLM call."
+            ),
+        ),
+    ] = "",
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -298,6 +309,7 @@ def import_markdown(
         source,
         topic,
         index,
+        goal=goal,
         dry_run=not apply,
         on_missing_paper=on_missing_paper,
     )
@@ -411,9 +423,11 @@ def mcp_serve(vault: VaultOption = None) -> None:
 
 
 def _print_import_plan(plan) -> None:
+    if plan.goal:
+        console.print(f"[bold]Research goal:[/] {plan.goal}")
     table = Table(title="Markdown Import Plan")
     table.add_column("Kind")
-    table.add_column("Target")
+    table.add_column("Target", overflow="fold")
     table.add_column("Sources")
     table.add_column("Review")
     for write in plan.planned_writes:
@@ -445,11 +459,12 @@ def _print_import_plan(plan) -> None:
     sections = [write for write in plan.planned_writes if write.kind == "guide-section"]
     if sections:
         section_table = Table(title="Proposed Guide Sections")
-        section_table.add_column("Target")
+        section_table.add_column("Target", overflow="fold")
         section_table.add_column("Papers")
         for write in sections:
             section_table.add_row(write.target_path, ", ".join(write.paper_paths) or "-")
         console.print(section_table)
+        console.print("\n".join(f"- {write.target_path}" for write in sections))
     broken_links = [item for item in plan.review_items if item.category == "broken-link"]
     if broken_links:
         broken_table = Table(title="Broken Links")

@@ -18,7 +18,10 @@ def test_obsidian_export_writes_notes_dashboards_and_indexes(tmp_path: Path) -> 
     save_index(vault, index)
     ObsidianExporter(vault).export_all(index)
 
-    assert (vault / "02 Paper Index.md").exists()
+    assert (vault / "PaperIndex.md").exists()
+    assert not (vault / "00 Home.md").exists()
+    assert not (vault / "01 Reading Dashboard.md").exists()
+    assert not (vault / "02 Paper Index.md").exists()
     assert not (vault / "02 Collection Index.md").exists()
     assert (vault / "Papers").is_dir()
     assert (vault / "Guides").is_dir()
@@ -197,8 +200,12 @@ def test_paper_index_maps_short_filename_to_paper_title(tmp_path: Path) -> None:
     vault.mkdir()
 
     ObsidianExporter(vault).export_all(index)
-    text = (vault / "02 Paper Index.md").read_text(encoding="utf-8")
+    text = (vault / "PaperIndex.md").read_text(encoding="utf-8")
 
+    assert "# PaperIndex" in text
+    assert "## Library" in text
+    assert "## Topic Guides" in text
+    assert "## Papers" in text
     assert "| Paper File | Paper Title | Year | Zotero Key |" in text
     assert (
         "| [[Papers/chen2025efficient|chen2025efficient.md]] | Efficient Learned Query "
@@ -215,7 +222,7 @@ def test_paper_index_escapes_markdown_table_pipes(tmp_path: Path) -> None:
     vault.mkdir()
 
     ObsidianExporter(vault).export_all(index)
-    text = (vault / "02 Paper Index.md").read_text(encoding="utf-8")
+    text = (vault / "PaperIndex.md").read_text(encoding="utf-8")
 
     assert "A \\| B Paper" in text
 
@@ -230,7 +237,7 @@ def test_dashboard_reports_data_quality_issues(tmp_path: Path) -> None:
     vault.mkdir()
 
     ObsidianExporter(vault).export_all(index)
-    text = (vault / "01 Reading Dashboard.md").read_text(encoding="utf-8")
+    text = (vault / "PaperIndex.md").read_text(encoding="utf-8")
 
     assert "## Data Quality" in text
     assert "- Missing abstracts: 2" in text

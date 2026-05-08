@@ -23,9 +23,9 @@ def build_guide_section_cites_paper_relationships(
 ) -> list[GuideSectionCitesPaper]:
     relationships: list[GuideSectionCitesPaper] = []
     for write in plan.planned_writes:
-        if write.kind != "guide-section":
+        if write.kind != "guide-section" or write.child_paths:
             continue
-        section_title = _section_title_from_path(write.target_path)
+        section_title = write.title or _section_title_from_path(write.target_path)
         for index, paper_key in enumerate(write.paper_keys):
             paper_path = write.paper_paths[index] if index < len(write.paper_paths) else ""
             if not paper_path:

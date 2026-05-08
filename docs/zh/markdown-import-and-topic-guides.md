@@ -4,6 +4,13 @@
 
 本文档描述新的 MVP 方向：PaperHub 需要支持 `paperhub import markdown`，但它只能是 processed import，把外部 research material 规范化成 agent 生成 topic guide 时使用的同一套 Obsidian 结构。
 
+MVP 应保留两个相关但不同的模式：
+
+- deterministic import：解析并清洗 source Markdown，对齐 papers，然后在不要求 LLM 调用的情况下写入 vault-local 的 `Papers/` 和 `Guides/` 输出；
+- prompt-driven synthesis：使用导入后的 source material 加用户 task prompt，通过 Codex、Claude Code、MCP client 或未来 local service 生成新的 task-aware reading guide。
+
+例如导入一个 awesome-list README 时，可以先保留一个 source-derived 的 PaperHub guide 作为 baseline；同时 agent workflow 也可以根据这样的 prompt 生成另一份新 guide：“我是 agent 行业的工程师，面向数亿用户数据，需要制作高效的 benchmark，用于训练/调教 agent 项目，你觉得我应该从哪里开始读这些论文？”
+
 ## Output Contract
 
 Vault output 应为：
@@ -19,7 +26,7 @@ Guides/
 
 暂时不要生成顶层 `Claims/`、`Collections/`、`Reading Paths/`、`Templates/` 或 `Concepts/` 文件夹。
 
-有实质内容的导入不应该只生成一个 topic Markdown 文件。长篇 survey、reading list、benchmark review 或多 paper 研究笔记，应该变成一个 main guide 加多个 graph-visible section notes。main guide 是综述和导航面；section notes 是稳定的 topic-level nodes，并且可以引用一个或多个规范化的 `Papers/` notes。
+有实质内容的导入不应该只生成一个 topic Markdown 文件。长篇 survey、reading list、benchmark review 或多 paper 研究笔记，应该变成一个 main guide 加多个 graph-visible section notes。main guide 是综述和导航面；section notes 是稳定的 topic-level nodes，并且可以引用一个或多个规范化的 `Papers/` notes。生成的 wikilink graph 中，main guide 只链接一级 sections；父 sections 链接直属 child sections；paper links 只出现在 leaf sections，或父 section 自身含 paper bullets 时生成的 `overview/overview.md` 子节点中。
 
 Importer 或 agent workflow 不能机械地按每个 source file、paper digest 或 heading 拆分。它应该先阅读导入的 guide material，理解作者本来的结构意图，再选择最小且有用的一组 sections。一个有 5 个真正顶层阅读章节的 guide，通常就应该生成 5 个 section notes，而不是每篇 paper 一个 note。
 
@@ -29,6 +36,7 @@ Guide section 里提到的每篇 paper 都应该解析到 `Papers/` 下的 Markd
 
 ```bash
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge"
+paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --goal "我是 agent 工程师，要构建大规模 benchmark，应该从哪里开始读？"
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --dry-run
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --apply
 paperhub import markdown /path/to/research-notes --topic "LLM-as-Judge" --on-missing-paper stage
@@ -40,6 +48,7 @@ paperhub zotero push-staged --write
 
 - `SOURCE`：必填的一次性 source path。
 - `--topic`：先设为必填；topic inference 以后再做。
+- `--goal`：可选用户任务 prompt。PaperHub 将它写入 import plan 和 guide，作为 agent-ready synthesis brief；确定性 import 不依赖模型调用。
 - 默认行为：只输出 import plan 和 report，不写文件。
 - `--dry-run`：保留为默认 preview 行为的兼容别名。
 - `--apply`：把复核后的 import plan 写入 vault。
@@ -113,8 +122,10 @@ paperhub zotero push-staged --write
 Codex / Claude Code 可以通过如下 workflow 为用户课题创建知识：
 
 ```text
-user topic
-  -> deep research across the web and current Zotero library
+source Markdown + user task prompt
+  -> PaperHub parses source papers, sections, links, and metadata
+  -> agent reads the structured source context and the user's goal
+  -> optional deep research across the web and current Zotero library
   -> candidate bibliography
   -> add missing papers to Zotero or staged import
   -> complete normalized Papers/ notes
@@ -122,7 +133,9 @@ user topic
   -> relationship manifest for later graph work
 ```
 
-生成的 guide 应更像结构化 reading guide 或 survey，而不是松散 note dump。每个有文献依据的 section 都应链接到一个或多个规范化 paper notes。
+生成的 guide 应更像结构化 reading guide 或 survey，而不是松散 note dump。它应该围绕用户的任务、角色、约束和想产出的 artifacts 重新组织，而不是机械保留 source Markdown 的顺序。每个有文献依据的 section 都应链接到一个或多个规范化 paper notes。
+
+PaperHub core 不应直接承担开放式 reasoning 步骤。它负责提供可靠的 ingredients 和 guardrails：source extraction、paper reconciliation、import plans、prompt/context packages、deterministic vault writes 和 validation。Codex / Claude Code 或其他 agent 负责 synthesis prose 和 reading-order decisions。
 
 ## Knowledge Graph Path
 
@@ -152,13 +165,15 @@ Papers/<citation-key>.md
 
 - 运行 `paperhub import markdown SOURCE --topic TOPIC` 会输出清楚的 import plan，且不写文件。
 - 加 `--apply` 时，只写入 `Papers/`、`Guides/` 和 root dashboard/index files。
+- deterministic import 在没有 model call 的情况下仍然可用。
+- prompt-driven agent workflow 可以接收 imported source context 加用户 prompt，生成新的 task-aware guide，但写入仍遵守 PaperHub 的 `Papers/` 和 `Guides/` contract。
 - 不在 Zotero 中的 imported paper digests 会写入 `Papers/IMPORTED-*.md`，并可由 `paperhub zotero push-staged` 列出。
 - Zotero 写入必须显式执行 `paperhub zotero push-staged --write`。
 - Importer 不直接复制 source directory。
 - 生成输出不得引用当前 vault 外的文件。Web URL 可以保留；本地 source files、图片、附件、绝对路径和 provenance paths 不得成为 vault links。
 - Paper notes 包含 Zotero-derived collections、tags、notes、attachments metadata、annotations、relations、sync versions，以及 citation、BibTeX、digest 和可保留的 user sections。
-- Topic guide 有 main Markdown file，并回链到 `Papers/`。
-- 已解析的 guide sections 会产出 `guide-section-cites-paper` relationship records。
+- Topic guide 有 main Markdown file，并链接到一级 sections，而不是直接链接所有 papers。
+- 已解析的 leaf 或 overview guide sections 会产出 `guide-section-cites-paper` relationship records。
 - Paper note filenames 使用 citation-key stems，而不是 Zotero keys 或 title-length slugs。
 - Missing 或 ambiguous papers 会被报告。
 - Existing user-authored sections 会被保留。
